@@ -1,0 +1,140 @@
+---
+title: "Sample Selection Method (Heckman)"
+author: "Jackie Finik"
+date: "11/1/2019"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+mainfont: Calibiri
+---
+
+Background
+====================================
+- Developed in the field of econometrics (Heckman, 1979) to address selection bias 
+- In the context of predicting wage (among those 'selected' into the labor force)
+- This approach can be carried out using the original 2-step approach, or simultaneously via ML estimation
+- Other extensions/applications have since developed 
+
+Heckman 'Sample Selection' Model (1979)
+====================================
+- Proposed a 2-step approach to correct for 'sample selection'
+  - 1) $y_i$* = $x'_i\beta$ + $\epsilon_i$  [Outcome Equation]
+  - 2) $d_i$* = $z'_i\gamma$ + $\upsilon_i$ [Selection Equation] 
+       - $y_i$ = $x'_i\beta$ + $\mu\hat{\lambda_i}$ + $\epsilon_i$ [Final Equation with Heckman Correction]
+
+  - 1) Model selection using probit model with exclusion restriction ('instrument')
+      - Estimate $\gamma$; produce estimate of $\hat{\lambda}$ ('Inverse Mills Ratio' - IMR)
+        - IMR ($\hat{\lambda_i}$) = $\phi(z'_i\gamma$) / $\Phi(z'_i\gamma$)
+        - $\hat{\lambda}$ captures the part of the error term for which selection affects $y$; +/- indicates nature of $r$ between [$\epsilon_i$, $\upsilon_i$]
+          - If $\hat{\lambda}$ is negative then unobserved factors that make selection more likely tend to be associated with a decrease in $y$
+  - 2) Model outcome of interest with $\hat{\lambda}$ as a regressor in the model ('control factor')
+      - T-test of $\mu$= 0 determines if selection bias is present
+
+Model Assumptions
+====================================
+- $y_i$* = $x'_i\beta$ + $\epsilon_i$  [Outcome Equation]
+- $d_i$* = $z'_i\gamma$ + $\upsilon_i$ [Selection Equation] 
+
+- Heckman model assumptions
+  - 1) Assumes joint normality of errors
+  - 2) Suitable exclusion restriction selected [factor(s) predicting selection ($z$) do not predict $y$]
+
+Applications
+====================================
+- R Package: sampleSelection (Toomet & Henningsen)
+- Stata Function: heckman and GLLAMM for multilevel selection
+  
+Example of implementation in R
+====================================
+- Example of implementation in R
+  - Greene (2002) using sampleSelection package
+  - Female labour supply (OLS, 2 Step Heckman, ML simultaneous estimation using Heckman sample selection correction)
+  - Mroz87 data frame contains n=753 married women
+  - Data from the "Panel Study of Income Dynamics" (PSID)
+    - Of the 753 observations, n=428 are women with positive hours worked in 1975, while n=325 are women who did not work for pay in 1975. 
+```{r, echo=FALSE}
+library(sampleSelection)
+data ("Mroz87")
+head(Mroz87)
+```
+
+OLS Regression
+========================================================
+```{r, echo=TRUE}
+library(sampleSelection)
+data ("Mroz87")
+Mroz87$kids <- (Mroz87$kids5 + Mroz87$kids618 > 0)
+#regular OLS model
+ols1 = lm(wage ~ educ + exper + I( exper^2 ) + city, data=subset(Mroz87, lfp==1))
+summary(ols1)
+```
+
+2-Step Heckman Correction
+========================================================
+- 2 Step Approach
+  - 1) Step 1:  model labor force participation (selection outcome) ('lfp')
+  - 2) Step 2:  model wage (outcome of interest)
+```{r 1, echo=TRUE}
+#estimate the selection, followed by outcome models
+greeneTS <- selection(lfp~ age + I(age^2) + faminc + kids + educ, + wage ~ exper + I(exper^2) + educ + city,
+                        data = Mroz87, method = "2step")
+
+#exclusion restriction (including var(s) in selection modeling not in outcome modeling; satisfied by age, faminc, kids)
+summary(greeneTS)
+#sigma > 0 observed outcomes are 'better' than average 
+```
+
+ML Simultaneous Estimation (with BHHH SE estimation)
+========================================================
+- Berndt-Hall-Hall-Hausman method to obtain SEs (see Greene 2002)
+```{r 2}
+greeneML <- selection (lfp ~ age + I(age^2) + faminc + kids + educ, + wage ~ exper + I(exper^2) + educ + city, data = Mroz87, maxMethod = "BHHH")
+summary(greeneML)
+```
+
+Debate in the literature
+========================================================
+- Debate regarding 2 step approach vs. ML, FIML methods
+  - Multivariate selection models increase complexity, more restrictive distributional assumptions, increase efficiency
+  - 2 step approach more robust to violations of assumptions and model misspecification
+      - Inaccurate SEs
+  - Some econometricians suggest ML (Nawata 2004) provide best estimates, others suggest that IRL 2 step should be preferred (Chiburis, Lokshin, 2007)
+  - Simulation study for application to clinical research found that ML method (combined with multiple imputation via MICE) provided least biased estimates for continuous and binary outcomes (Galimard et al 2018)
+    -  Also extended this method for binary outcomes for applications in clinical research
+
+Advantages over multiple imputation methods
+========================================================
+- Specifying individual imputation models to impute each incomplete variable is less efficient (then a one-step ML estimation w/ Heckman's correction)
+- Multiple imputation often requires joint models for the incomplete variable and it's indicators. 
+- Galimard et al 2018, found only MICE with Heckman's correction produced unbiased estimates for MNAR outcomes
+  - For MAR predictors, the combined approach outperformed all other methods 
+
+Galimard et al. 2018
+========================================================
+Simulation Study (Binary Outcome)
+  - HEml: ML estimation with Heckman correction
+  - MIHEml: multiple imputation with above ML + Heckman correction
+    - Y Axis: %Bias [percent relative bias]
+![Galimard1](./galimard1.png)
+
+Galimard et al. 2018 
+========================================================
+Simulation Study (Continuous Outcome)
+  - HE2steps: Heckman's 2 step approach
+  - MIHE2steps: multiple imputation with Heckman's 2 step approach
+    - Y Axis: %Bias [percent relative bias]
+![Galimard2](./galimard2.png)
+
+Extended implementations 
+========================================================
+- Panel Data:
+    - Diggle & Kenward, 1994 extended the method to panel data ('outcome-dependent selection models') where the 'selection equation' models dropout as a function of current (missing) responses and lagged responses 
+    - ML w/ heckman estimator preffered as 2 step approach does not account for within panel correlation
+    - Random effects model with sample selection for panel data applications only available in Stata GLLAMM  
+- Implementation in hierarchical data
+  - GLLAMM can be used to extend the Diggle & Kenward method to multilevel models where selection may occur at multiple levels
+- Combining the Heckman approach with multiple imputation method (code available via Gelimard et al. 2018; supplementary code for [binary] and [continuous] outcomes
+
+
